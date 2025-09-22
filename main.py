@@ -41,13 +41,13 @@ async def trigger_pin(item: PinTrigger):
 
         try:
             # Set the pin to HIGH
-            lgpio.gpio_write(h, item.pin, 1)
+            lgpio.gpio_write(h, item.pin, 0)
 
             # Asynchronously wait for the specified duration
             await asyncio.sleep(item.duration)
 
             # Set the pin to LOW
-            lgpio.gpio_write(h, item.pin, 0)
+            lgpio.gpio_write(h, item.pin, 1)
 
         finally:
             # Always release the pin
