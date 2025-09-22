@@ -90,3 +90,59 @@ Once the server is running, you can access the interactive API documentation (pr
 [http://<your-pi-ip-address>:8000/docs](http://<your-pi-ip-address>:8000/docs)
 
 From there, you can test the `/trigger_pin/` endpoint directly from your browser.
+
+## Running on Startup
+
+To ensure the server runs automatically every time your Raspberry Pi boots up, you can set it up as a `systemd` service.
+
+### 1. Configure the Service File
+
+Before creating the service, you need to configure it for your specific user.
+
+1.  **Open `pi-server-control-gpio.service`** in a text editor.
+2.  **Replace all instances of `<YOUR_USERNAME>`** with your actual username (e.g., `pi`).
+
+    *Note: If you cloned the repository to a location other than the user's home directory, you will also need to update the `WorkingDirectory` and `ExecStart` paths accordingly.*
+
+### 2. Copy the Service File
+
+Once you have configured the file, copy it to the `systemd` directory:
+
+```bash
+sudo cp pi-server-control-gpio.service /etc/systemd/system/pi-server-control-gpio.service
+```
+
+### 3. Reload the `systemd` Daemon
+
+After copying the file, reload the `systemd` daemon to recognize the new service:
+
+```bash
+sudo systemctl daemon-reload
+```
+
+### 4. Enable the Service
+
+Enable the service to start on boot:
+
+```bash
+sudo systemctl enable pi-server-control-gpio.service
+```
+
+### 5. Start the Service
+
+You can start the service immediately without rebooting:
+
+```bash
+sudo systemctl start pi-server-control-gpio.service
+```
+
+### 6. Check the Status
+
+To check if the service is running correctly, use the following command:
+
+```bash
+sudo systemctl status pi-server-control-gpio.service
+```
+
+This will show you the status of the service and any recent log entries.
+
