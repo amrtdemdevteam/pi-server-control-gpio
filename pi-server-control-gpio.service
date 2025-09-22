@@ -1,0 +1,16 @@
+[Unit]
+Description=Pi Server Control GPIO Service
+After=network.target
+
+[Service]
+# IMPORTANT: Replace <YOUR_USERNAME> with your actual username.
+User=<YOUR_USERNAME>
+Group=<YOUR_USERNAME>
+
+# Adjust the path if you cloned the repository to a different location.
+WorkingDirectory=/home/<YOUR_USERNAME>/pi-server-control-gpio
+ExecStart=/home/<YOUR_USERNAME>/pi-server-control-gpio/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
