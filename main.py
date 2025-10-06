@@ -5,7 +5,7 @@ import lgpio
 import atexit
 
 # Define the GPIO pin to be used
-INITIAL_PIN = 17
+INITIAL_PIN = 22
 
 # Global variable to hold the GPIO chip handle
 h = None
@@ -21,8 +21,8 @@ def setup_gpio():
     try:
         h = lgpio.gpiochip_open(0)
         lgpio.gpio_claim_output(h, INITIAL_PIN)
-        lgpio.gpio_write(h, INITIAL_PIN, 1) # Set pin to HIGH
-        print(f"Pin {INITIAL_PIN} initialized to HIGH.")
+        lgpio.gpio_write(h, INITIAL_PIN, 0) # Set pin to LOW
+        print(f"Pin {INITIAL_PIN} initialized to LOW.")
     except lgpio.error as e:
         print(f"GPIO setup error: {e}")
         if h:
@@ -74,13 +74,13 @@ async def trigger_pin(item: PinTrigger):
 
     try:
         # Set the pin to LOW
-        lgpio.gpio_write(h, item.pin, 0)
+        lgpio.gpio_write(h, item.pin, 1)
 
         # Asynchronously wait for the specified duration
         await asyncio.sleep(item.duration)
 
         # Set the pin to HIGH
-        lgpio.gpio_write(h, item.pin, 1)
+        lgpio.gpio_write(h, item.pin, 0)
 
     except lgpio.error as e:
         raise HTTPException(status_code=500, detail=f"GPIO error: {e}")
@@ -106,3 +106,4 @@ def read_root():
 # To run this application:
 # 1. Install dependencies: pip install -r requirements.txt
 # 2. Run the server: uvicorn main:app --host 0.0.0.0 --port 8000
+
