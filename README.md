@@ -1,148 +1,191 @@
 # Raspberry Pi GPIO Control API
 
-This project provides a simple and efficient FastAPI-based server to control a GPIO pin on a Raspberry Pi 5. It is specifically configured to manage **pin 17**.
+A small FastAPI server for a Raspberry Pi 5 that sends a timed pulse on one GPIO pin. In the TPCAP Auto-ECAR system it is the **IO module** that resets a station PLC: `ecar_server` (`PlcService`) calls it on server start and at 07:15 and 12:50 every day.
 
-## Features
+- **Pin:** BCM **GPIO 22**, which is **physical pin 15** on the 40-pin header (nearest ground: pin 14)
+- **Logic:** **active-HIGH**. The pin is LOW when idle and goes HIGH for `duration` seconds when triggered
+- **Port:** HTTP `8000`
 
-- **FastAPI Backend**: A modern, fast (high-performance) web framework for building APIs with Python.
-- **GPIO Control**: Exposes a single endpoint to trigger a GPIO pin.
-- **Startup Initialization**: Automatically initializes GPIO pin 17 to a **HIGH** logic level when the server starts.
-- **Graceful Shutdown**: Cleans up GPIO resources and sets pin 17 to **LOW** when the server shuts down.
-- **Concurrent Request Handling**: Includes a locking mechanism to prevent multiple requests from accessing the pin simultaneously.
+## How it works
 
-## How It Works
+### Startup
 
-### Server Startup
+1. Opens GPIO chip 0 (`/dev/gpiochip0`) with `lgpio`.
+2. Claims GPIO 22 as an output.
+3. Sets GPIO 22 **LOW** (idle) and prints `Pin 22 initialized to LOW.`
 
-When the server starts, it performs the following actions:
-1.  Opens a connection to the GPIO chip.
-2.  Claims GPIO pin 17 as an output.
-3.  Sets pin 17 to a **HIGH** state.
+If any of these steps fails, the server prints `GPIO setup error: ...` and keeps running, but `/trigger_pin/` returns `500 GPIO chip not initialized.` Fix the cause and restart the service.
 
-This ensures that the connected device is in a known, default state as soon as the application is running.
+### Triggering the pin
 
-### Triggering the Pin
+`POST /trigger_pin/` sets GPIO 22 **HIGH**, waits `duration` seconds (without blocking other requests), then sets it back **LOW**. The response is sent after the pulse has finished.
 
-The API exposes a single endpoint, `/trigger_pin/`, that allows you to temporarily set the pin to **LOW**.
+Only one pulse can run at a time. A request that arrives while a pulse is running gets `409` straight away; it is not queued.
 
-- **Endpoint**: `POST /trigger_pin/`
-- **Request Body**:
-  ```json
-  {
-    "pin": 17,
-    "duration": 1.5
-  }
-  ```
-  - `pin` (integer): The pin to trigger. Must be `17`.
-  - `duration` (float): The time in seconds to keep the pin in the LOW state.
+### Shutdown
 
-When a request is received, the server sets pin 17 to **LOW** for the specified duration and then returns it to its default **HIGH** state.
+Sets GPIO 22 LOW, releases the pin and closes the GPIO chip.
 
-### Server Shutdown
+### Why active-HIGH
 
-On shutdown, the server will automatically set pin 17 back to **LOW** and release all GPIO resources.
+At power-on GPIO 22 is an input with its internal pull-down, so it reads LOW. With LOW meaning "do nothing", the PLC is not reset while the Pi is booting or while the service is stopped. If you change the relay module, make sure it switches on a 3.3 V HIGH input.
 
-## Getting Started
+## API
+
+Base URL: `http://<pi-ip>:8000`. There is no authentication.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Check that the server is running |
+| POST | `/trigger_pin/` | Send one pulse on GPIO 22 |
+| GET | `/docs` | Swagger UI (you can send test requests from the browser) |
+
+### `POST /trigger_pin/`
+
+Request body:
+
+```json
+{
+  "pin": 22,
+  "duration": 1.0
+}
+```
+
+- `pin` (integer): BCM pin number. Must be `22`.
+- `duration` (float): how long to hold the pin HIGH, in seconds. `ecar_server` sends `1.0`.
+
+Response `200`:
+
+```json
+{
+  "status": "success",
+  "pin": 22,
+  "duration": 1.0,
+  "message": "Pin 22 was triggered for 1.0 seconds."
+}
+```
+
+| Status | When |
+|---|---|
+| 200 | Pulse finished |
+| 307 | Called `/trigger_pin` without the trailing slash; redirects to `/trigger_pin/` |
+| 400 | `pin` is not 22 |
+| 409 | A pulse is already running |
+| 422 | Body is missing a field or has the wrong type |
+| 500 | GPIO was not initialized at startup, or `lgpio` raised an error |
+
+Example:
+
+```bash
+curl -X POST http://<pi-ip>:8000/trigger_pin/ \
+  -H 'Content-Type: application/json' \
+  -d '{"pin": 22, "duration": 1.0}'
+```
+
+Notes for callers:
+
+- Set the client timeout to at least `duration + 2` seconds (3 s for the 1.0 s reset).
+- `duration` is not range-checked. Do not send negative or very large values.
+- Run only one uvicorn worker. Several workers would each try to claim GPIO 22, and the in-memory lock is not shared between them.
+
+## Getting started
 
 ### Prerequisites
 
-- A Raspberry Pi 5 with Raspberry Pi OS.
-- Python 3.7+ installed.
-- `lgpio` library, which is typically pre-installed on modern Raspberry Pi OS images.
+- Raspberry Pi 5 with Raspberry Pi OS Bookworm
+- Python 3.9 or newer (Bookworm ships 3.11)
+- The user that runs the service must be in the `gpio` group
 
 ### Installation
 
-1.  **Clone the repository**:
-    ```bash
-    git clone <your-repository-url>
-    cd pi-server-control-gpio
-    ```
-
-2.  **Create a `requirements.txt` file**:
-    ```
-    fastapi
-    uvicorn[standard]
-    lgpio
-    ```
-
-3.  **Install the dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-### Running the Server
-
-To run the API server, execute the following command in your terminal:
-
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
+sudo apt update
+sudo apt install -y git python3-venv python3-lgpio gpiod
+
+git clone git@github.com:amrtdemdevteam/pi-server-control-gpio.git
+cd pi-server-control-gpio
+
+# --system-site-packages lets the venv use python3-lgpio from apt
+python3 -m venv --system-site-packages venv
+venv/bin/pip install -r requirements.txt
 ```
 
-- `--host 0.0.0.0`: Makes the server accessible from other devices on your network.
-- `--port 8000`: Runs the server on port 8000.
-
-You should see output indicating that pin 17 has been initialized to HIGH.
-
-## API Documentation
-
-Once the server is running, you can access the interactive API documentation (provided by Swagger UI) by navigating to:
-
-[http://<your-pi-ip-address>:8000/docs](http://<your-pi-ip-address>:8000/docs)
-
-From there, you can test the `/trigger_pin/` endpoint directly from your browser.
-
-## Running on Startup
-
-To ensure the server runs automatically every time your Raspberry Pi boots up, you can set it up as a `systemd` service.
-
-### 1. Configure the Service File
-
-Before creating the service, you need to configure it for your specific user.
-
-1.  **Open `pi-server-control-gpio.service`** in a text editor.
-2.  **Replace all instances of `<YOUR_USERNAME>`** with your actual username (e.g., `pi`).
-
-    *Note: If you cloned the repository to a location other than the user's home directory, you will also need to update the `WorkingDirectory` and `ExecStart` paths accordingly.*
-
-### 2. Copy the Service File
-
-Once you have configured the file, copy it to the `systemd` directory:
+Check that GPIO 22 is on `gpiochip0` and is not used by another program:
 
 ```bash
-sudo cp pi-server-control-gpio.service /etc/systemd/system/pi-server-control-gpio.service
+gpioinfo | grep GPIO22
 ```
 
-### 3. Reload the `systemd` Daemon
-
-After copying the file, reload the `systemd` daemon to recognize the new service:
+### Running the server manually
 
 ```bash
-sudo systemctl daemon-reload
+venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-### 4. Enable the Service
+You should see `Pin 22 initialized to LOW.`
 
-Enable the service to start on boot:
+## Running on startup (systemd)
+
+1. Replace `<YOUR_USERNAME>` in `pi-server-control-gpio.service` with the user that owns the repository (for example `pi`). If the repository is not in that user's home directory, also update `WorkingDirectory` and `ExecStart`.
+
+   ```bash
+   sed -i "s/<YOUR_USERNAME>/$USER/g" pi-server-control-gpio.service
+   ```
+
+2. Install, enable and start the service:
+
+   ```bash
+   sudo cp pi-server-control-gpio.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now pi-server-control-gpio.service
+   ```
+
+3. Check the status and logs:
+
+   ```bash
+   systemctl status pi-server-control-gpio.service
+   journalctl -u pi-server-control-gpio -f
+   ```
+
+### Updating
 
 ```bash
-sudo systemctl enable pi-server-control-gpio.service
+cd ~/pi-server-control-gpio
+git pull
+venv/bin/pip install -r requirements.txt
+sudo systemctl restart pi-server-control-gpio
 ```
 
-### 5. Start the Service
+Avoid restarting around 07:15 and 12:50, when `ecar_server` sends its scheduled resets.
 
-You can start the service immediately without rebooting:
+## Wiring
 
-```bash
-sudo systemctl start pi-server-control-gpio.service
+| Signal | Header pin |
+|---|---|
+| GPIO 22 (output) | 15 |
+| Ground | 14 |
+
+A GPIO pin gives 3.3 V and only a few mA, so drive the PLC reset input through a relay module (or optocoupler/SSR) that accepts a 3.3 V active-HIGH input. Never connect 5 V or 24 V to the GPIO pin.
+
+## Registering the Pi in ecar_server
+
+`ecar_server` finds each station's IO module in the `optionalIo` field of the station document (database `tpcap-ecar`, collection `stations`):
+
+```js
+{ optionalIo: { ip: "192.168.50.X", port: 8000, type: "pi5", description: "PLC reset BODY" } }
 ```
 
-### 6. Check the Status
+Stop `ecar_server` before editing this field, because it writes station state back to MongoDB every 3 seconds. When it starts again it sends a reset to every IO module after about 2 seconds, which is a quick way to test the connection.
 
-To check if the service is running correctly, use the following command:
+## Troubleshooting
 
-```bash
-sudo systemctl status pi-server-control-gpio.service
-```
+| Symptom | Likely cause |
+|---|---|
+| `500 GPIO chip not initialized.` | User not in the `gpio` group, another program holds GPIO 22, or the header is not on `gpiochip0` (older kernels). Check `journalctl`, fix, then restart the service. |
+| Service fails to start | `<YOUR_USERNAME>` not replaced, `venv/` missing, or `lgpio` not importable in the venv |
+| Frequent `409` | Two stations point to the same Pi and are triggered together, or the caller retries before the pulse ends |
+| `200` but the PLC does not reset | Wrong header pin, loose wire, or the relay module is active-LOW or does not switch at 3.3 V |
 
-This will show you the status of the service and any recent log entries.
+## License
 
+MIT. See [LICENSE](LICENSE).
